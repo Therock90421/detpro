@@ -1,13 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.runner import auto_fp16, force_fp32
 from torch.nn.modules.utils import _pair
 
-from mmdet.core import build_bbox_coder, multi_apply, multiclass_nms
+from mmdet.core import (auto_fp16, build_bbox_coder, force_fp32, multi_apply,
+                        multiclass_nms)
 from mmdet.models.builder import HEADS, build_loss
 from mmdet.models.losses import accuracy
-import numpy as np
 
 
 @HEADS.register_module()
@@ -24,7 +23,6 @@ class BBoxHead(nn.Module):
                  num_classes=80,
                  bbox_coder=dict(
                      type='DeltaXYWHBBoxCoder',
-                     clip_border=True,
                      target_means=[0., 0., 0., 0.],
                      target_stds=[0.1, 0.1, 0.2, 0.2]),
                  reg_class_agnostic=False,
@@ -59,7 +57,7 @@ class BBoxHead(nn.Module):
             in_channels *= self.roi_feat_area
         if self.with_cls:
             # need to add background class
-            self.fc_cls = nn.Linear(in_channels, num_classes + 1)
+            self.fc_cls = nn.Linear(in_channels, num_classes)
         if self.with_reg:
             out_dim_reg = 4 if reg_class_agnostic else 4 * num_classes
             self.fc_reg = nn.Linear(in_channels, out_dim_reg)
@@ -141,6 +139,7 @@ class BBoxHead(nn.Module):
 
     @force_fp32(apply_to=('cls_score', 'bbox_pred'))
     def loss(self,
+             cls_score,
              bbox_pred,
              rois,
              labels,
@@ -149,16 +148,16 @@ class BBoxHead(nn.Module):
              bbox_weights,
              reduction_override=None):
         losses = dict()
-        # if cls_score is not None:
-        #     avg_factor = max(torch.sum(label_weights > 0).float().item(), 1.)
-        #     if cls_score.numel() > 0:
-        #         losses['loss_cls'] = self.loss_cls(
-        #             cls_score,
-        #             labels,
-        #             label_weights,
-        #             avg_factor=avg_factor,
-        #             reduction_override=reduction_override)
-        #         losses['acc'] = accuracy(cls_score, labels)
+        if cls_score is not None:
+            avg_factor = max(torch.sum(label_weights > 0).float().item(), 1.)
+            if cls_score.numel() > 0:
+                losses['loss_cls'] = self.loss_cls(
+                    cls_score,
+                    labels,
+                    label_weights,
+                    avg_factor=avg_factor,
+                    reduction_override=reduction_override)
+                losses['acc'] = accuracy(cls_score, labels)
         if bbox_pred is not None:
             bg_class_ind = self.num_classes
             # 0~self.num_classes-1 are FG, self.num_classes is BG
@@ -182,7 +181,7 @@ class BBoxHead(nn.Module):
                     avg_factor=bbox_targets.size(0),
                     reduction_override=reduction_override)
             else:
-                losses['loss_bbox'] = bbox_pred[pos_inds].sum()
+                losses['loss_bbox'] = bbox_pred.sum() * 0
         return losses
 
     @force_fp32(apply_to=('cls_score', 'bbox_pred'))
@@ -194,10 +193,9 @@ class BBoxHead(nn.Module):
                    scale_factor,
                    rescale=False,
                    cfg=None):
-        # if isinstance(cls_score, list):
-        #     cls_score = sum(cls_score) / float(len(cls_score))
-        # scores = F.softmax(cls_score, dim=1) if cls_score is not None else None
-        scores = cls_score
+        if isinstance(cls_score, list):
+            cls_score = sum(cls_score) / float(len(cls_score))
+        scores = F.softmax(cls_score, dim=1) if cls_score is not None else None
 
         if bbox_pred is not None:
             bboxes = self.bbox_coder.decode(
@@ -224,7 +222,6 @@ class BBoxHead(nn.Module):
                                                     cfg.max_per_img)
 
             return det_bboxes, det_labels
-
 
     @force_fp32(apply_to=('bbox_preds', ))
     def refine_bboxes(self, rois, labels, bbox_preds, pos_is_gts, img_metas):

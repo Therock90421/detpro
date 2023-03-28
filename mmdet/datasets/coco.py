@@ -2,7 +2,6 @@ import itertools
 import logging
 import os.path as osp
 import tempfile
-from collections import OrderedDict
 
 import mmcv
 import numpy as np
@@ -17,13 +16,10 @@ from .custom import CustomDataset
 
 try:
     import pycocotools
-    if not hasattr(pycocotools, '__sphinx_mock__'):  # for doc generation
-        assert pycocotools.__version__ >= '12.0.2'
+    assert pycocotools.__version__ >= '12.0.2'
 except AssertionError:
-    raise AssertionError('Incompatible version of pycocotools is installed. '
-                         'Run pip uninstall pycocotools first. Then run pip '
-                         'install mmpycocotools to install open-mmlab forked '
-                         'pycocotools.')
+    raise ImportError('Please run pip install mmpycocotools to '
+                      'install open-mmlab forked pycocotools first.')
 
 
 @DATASETS.register_module()
@@ -55,36 +51,9 @@ class CocoDataset(CustomDataset):
         """
 
         self.coco = COCO(ann_file)
-        # print(self.cat2label)
-        self.img_ids = self.coco.get_img_ids()
-        self.ignore_ids_train = [4, 5, 9, 10, 11, 12, 15, 16, 19, 20, 25, 27, 31, 32, 34, 35, 36, 38, 40, 41, 43, 52, 55, 57, 58, 60, 66, 67, 71, 76, 77, 78]
-        self.ignore_ids_test = [9, 10, 11, 12, 32, 34, 35, 38, 40, 52, 58, 60, 67, 77, 78]
-        CLASSES_for_evaluate = []
-        if self.test_mode:
-            for id in range(len(self.CLASSES)):
-                if id not in self.ignore_ids_test:
-                    CLASSES_for_evaluate.append(self.CLASSES[id])
-            self.cat_ids_for_evaluate = self.coco.get_cat_ids(cat_names=CLASSES_for_evaluate)
         self.cat_ids = self.coco.get_cat_ids(cat_names=self.CLASSES)
         self.cat2label = {cat_id: i for i, cat_id in enumerate(self.cat_ids)}
-        self.ignore_cats = []
-        cats = {}
-        # self.img_ids = self.img_ids[:50]
-        if self.test_mode:
-            for cat in self.coco.cats:
-                if cat in self.cat_ids and self.cat2label[cat] not in self.ignore_ids_test:
-                    cats[cat] = self.coco.cats[cat]
-                else:
-                    self.ignore_cats.append(cat)
-            self.coco.cats = cats
-        else:
-            for cat in self.coco.cats:
-                if self.cat2label[cat] not in self.ignore_ids_train:
-                    cats[cat] = self.coco.cats[cat]
-                else:
-                    self.ignore_cats.append(cat)
-        # self.img_ids = self.img_ids[:50]
-            # self.coco.cats = cats
+        self.img_ids = self.coco.get_img_ids()
         data_infos = []
         for i in self.img_ids:
             info = self.coco.load_imgs([i])[0]
@@ -125,26 +94,38 @@ class CocoDataset(CustomDataset):
     def _filter_imgs(self, min_size=32):
         """Filter images too small or without ground truths."""
         valid_inds = []
-        # obtain images that contain annotation
         ids_with_ann = set(_['image_id'] for _ in self.coco.anns.values())
-        # obtain images that contain annotations of the required categories
-        ids_in_cat = set()
-        for i, class_id in enumerate(self.cat_ids):
-            ids_in_cat |= set(self.coco.cat_img_map[class_id])
-        # merge the image id sets of the two conditions and use the merged set
-        # to filter out images if self.filter_empty_gt=True
-        ids_in_cat &= ids_with_ann
-
-        valid_img_ids = []
         for i, img_info in enumerate(self.data_infos):
-            img_id = self.img_ids[i]
-            if self.filter_empty_gt and img_id not in ids_in_cat:
+            if self.filter_empty_gt and self.img_ids[i] not in ids_with_ann:
                 continue
             if min(img_info['width'], img_info['height']) >= min_size:
                 valid_inds.append(i)
-                valid_img_ids.append(img_id)
-        self.img_ids = valid_img_ids
         return valid_inds
+
+    def get_subset_by_classes(self):
+        """Get img ids that contain any category in class_ids.
+
+        Different from the coco.getImgIds(), this function returns the id if
+        the img contains one of the categories rather than all.
+
+        Args:
+            class_ids (list[int]): list of category ids
+
+        Return:
+            ids (list[int]): integer list of img ids
+        """
+
+        ids = set()
+        for i, class_id in enumerate(self.cat_ids):
+            ids |= set(self.coco.cat_img_map[class_id])
+        self.img_ids = list(ids)
+
+        data_infos = []
+        for i in self.img_ids:
+            info = self.coco.load_imgs([i])[0]
+            info['filename'] = info['file_name']
+            data_infos.append(info)
+        return data_infos
 
     def _parse_ann_info(self, img_info, ann_info):
         """Parse bbox and mask annotation.
@@ -164,9 +145,6 @@ class CocoDataset(CustomDataset):
         gt_masks_ann = []
         for i, ann in enumerate(ann_info):
             if ann.get('ignore', False):
-                continue
-            if ann['category_id'] in self.ignore_cats:
-                # print('ignore {}'.format(ann['category_id']))
                 continue
             x1, y1, w, h = ann['bbox']
             inter_w = max(0, min(x1 + w, img_info['width']) - max(x1, 0))
@@ -249,15 +227,31 @@ class CocoDataset(CustomDataset):
         for idx in range(len(self)):
             img_id = self.img_ids[idx]
             result = results[idx]
-            for label in range(len(result)):
-                bboxes = result[label]
-                for i in range(bboxes.shape[0]):
-                    data = dict()
-                    data['image_id'] = img_id
-                    data['bbox'] = self.xyxy2xywh(bboxes[i])
-                    data['score'] = float(bboxes[i][4])
-                    data['category_id'] = self.cat_ids[label]
-                    json_results.append(data)
+            citylabel = [0, 1, 2, 3, 5, 6, 7]
+            citydict = {0: 24, 2: 26, 7: 27, 5: 28, 6: 31, 3: 32, 1: 33}
+            if len(result) == 80:
+                for label in range(len(result)):
+                    if label in citylabel:
+                        bboxes = result[label]
+                        for i in range(bboxes.shape[0]):
+                            data = dict()
+                            data['image_id'] = img_id
+                            data['bbox'] = self.xyxy2xywh(bboxes[i])
+                            data['score'] = float(bboxes[i][4])
+                            data['category_id'] = citydict[label]
+                            json_results.append(data)
+            else:
+                for label in range(len(result)):
+                    bboxes = result[label]
+                    for i in range(bboxes.shape[0]):
+                        data = dict()
+                        data['image_id'] = img_id
+                        data['bbox'] = self.xyxy2xywh(bboxes[i])
+                        data['score'] = float(bboxes[i][4])
+                        data['category_id'] = self.cat_ids[label]
+                        json_results.append(data)
+                
+
         return json_results
 
     def _segm2json(self, results):
@@ -275,10 +269,7 @@ class CocoDataset(CustomDataset):
                     data['image_id'] = img_id
                     data['bbox'] = self.xyxy2xywh(bboxes[i])
                     data['score'] = float(bboxes[i][4])
-                    try:
-                        data['category_id'] = self.cat_ids[label]
-                    except:
-                        print(label)
+                    data['category_id'] = self.cat_ids[label]
                     bbox_json_results.append(data)
 
                 # segm results
@@ -398,7 +389,7 @@ class CocoDataset(CustomDataset):
                  metric='bbox',
                  logger=None,
                  jsonfile_prefix=None,
-                 classwise=True,
+                 classwise=False,
                  proposal_nums=(100, 300, 1000),
                  iou_thrs=None,
                  metric_items=None):
@@ -432,7 +423,6 @@ class CocoDataset(CustomDataset):
         Returns:
             dict[str, float]: COCO style evaluation metric.
         """
-
         metrics = metric if isinstance(metric, list) else [metric]
         allowed_metrics = ['bbox', 'segm', 'proposal', 'proposal_fast']
         for metric in metrics:
@@ -444,10 +434,9 @@ class CocoDataset(CustomDataset):
         if metric_items is not None:
             if not isinstance(metric_items, list):
                 metric_items = [metric_items]
-
         result_files, tmp_dir = self.format_results(results, jsonfile_prefix)
 
-        eval_results = OrderedDict()
+        eval_results = {}
         cocoGt = self.coco
         for metric in metrics:
             msg = f'Evaluating {metric}...'
@@ -479,7 +468,7 @@ class CocoDataset(CustomDataset):
 
             iou_type = 'bbox' if metric == 'proposal' else metric
             cocoEval = COCOeval(cocoGt, cocoDt, iou_type)
-            cocoEval.params.catIds = self.cat_ids_for_evaluate
+            cocoEval.params.catIds = self.cat_ids
             cocoEval.params.imgIds = self.img_ids
             cocoEval.params.maxDets = list(proposal_nums)
             cocoEval.params.iouThrs = iou_thrs
@@ -528,10 +517,10 @@ class CocoDataset(CustomDataset):
                     # from https://github.com/facebookresearch/detectron2/
                     precisions = cocoEval.eval['precision']
                     # precision: (iou, recall, cls, area range, max dets)
-                    assert len(self.cat_ids_for_evaluate) == precisions.shape[2]
+                    assert len(self.cat_ids) == precisions.shape[2]
 
                     results_per_category = []
-                    for idx, catId in enumerate(self.cat_ids_for_evaluate):
+                    for idx, catId in enumerate(self.cat_ids):
                         # area range index 0: all area ranges
                         # max dets index -1: typically 100 per image
                         nm = self.coco.loadCats(catId)[0]

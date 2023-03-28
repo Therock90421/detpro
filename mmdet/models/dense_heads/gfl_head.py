@@ -1,15 +1,23 @@
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.cnn import ConvModule, Scale, bias_init_with_prob, normal_init
-from mmcv.runner import force_fp32
 
 from mmdet.core import (anchor_inside_flags, bbox2distance, bbox_overlaps,
                         build_assigner, build_sampler, distance2bbox,
-                        images_to_levels, multi_apply, multiclass_nms,
-                        reduce_mean, unmap)
+                        force_fp32, images_to_levels, multi_apply,
+                        multiclass_nms, unmap)
 from ..builder import HEADS, build_loss
 from .anchor_head import AnchorHead
+
+
+def reduce_mean(tensor):
+    if not (dist.is_available() and dist.is_initialized()):
+        return tensor
+    tensor = tensor.clone()
+    dist.all_reduce(tensor.div_(dist.get_world_size()), op=dist.ReduceOp.SUM)
+    return tensor
 
 
 class Integral(nn.Module):
@@ -345,8 +353,7 @@ class GFLHead(AnchorHead):
          bbox_weights_list, num_total_pos, num_total_neg) = cls_reg_targets
 
         num_total_samples = reduce_mean(
-            torch.tensor(num_total_pos, dtype=torch.float,
-                         device=device)).item()
+            torch.tensor(num_total_pos).cuda()).item()
         num_total_samples = max(num_total_samples, 1.0)
 
         losses_cls, losses_bbox, losses_dfl,\
@@ -375,8 +382,7 @@ class GFLHead(AnchorHead):
                            img_shape,
                            scale_factor,
                            cfg,
-                           rescale=False,
-                           with_nms=True):
+                           rescale=False):
         """Transform outputs for a single batch item into labeled boxes.
 
         Args:
@@ -395,8 +401,6 @@ class GFLHead(AnchorHead):
                 if None, test_cfg would be used.
             rescale (bool): If True, return boxes in original image space.
                 Default: False.
-            with_nms (bool): If True, do nms before return boxes.
-                Default: True.
 
         Returns:
             tuple(Tensor):
@@ -446,13 +450,10 @@ class GFLHead(AnchorHead):
         padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
         mlvl_scores = torch.cat([mlvl_scores, padding], dim=1)
 
-        if with_nms:
-            det_bboxes, det_labels = multiclass_nms(mlvl_bboxes, mlvl_scores,
-                                                    cfg.score_thr, cfg.nms,
-                                                    cfg.max_per_img)
-            return det_bboxes, det_labels
-        else:
-            return mlvl_bboxes, mlvl_scores
+        det_bboxes, det_labels = multiclass_nms(mlvl_bboxes, mlvl_scores,
+                                                cfg.score_thr, cfg.nms,
+                                                cfg.max_per_img)
+        return det_bboxes, det_labels
 
     def get_targets(self,
                     anchor_list,
@@ -586,7 +587,7 @@ class GFLHead(AnchorHead):
         bbox_targets = torch.zeros_like(anchors)
         bbox_weights = torch.zeros_like(anchors)
         labels = anchors.new_full((num_valid_anchors, ),
-                                  self.num_classes,
+                                  self.background_label,
                                   dtype=torch.long)
         label_weights = anchors.new_zeros(num_valid_anchors, dtype=torch.float)
 
@@ -597,9 +598,7 @@ class GFLHead(AnchorHead):
             bbox_targets[pos_inds, :] = pos_bbox_targets
             bbox_weights[pos_inds, :] = 1.0
             if gt_labels is None:
-                # Only rpn gives gt_labels as None
-                # Foreground is the first class
-                labels[pos_inds] = 0
+                labels[pos_inds] = 1
             else:
                 labels[pos_inds] = gt_labels[
                     sampling_result.pos_assigned_gt_inds]

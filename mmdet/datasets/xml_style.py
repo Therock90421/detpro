@@ -18,9 +18,8 @@ class XMLDataset(CustomDataset):
             boxes in the images. If the size of a bounding box is less than
             ``min_size``, it would be add to ignored field.
     """
+
     def __init__(self, min_size=None, **kwargs):
-        assert self.CLASSES or kwargs.get(
-            'classes', None), 'CLASSES in `XMLDataset` can not be None.'
         super(XMLDataset, self).__init__(**kwargs)
         self.cat2label = {cat: i for i, cat in enumerate(self.CLASSES)}
         self.min_size = min_size
@@ -37,19 +36,27 @@ class XMLDataset(CustomDataset):
 
         data_infos = []
         img_ids = mmcv.list_from_file(ann_file)
-        for img_id in img_ids:
-            filename = f'JPEGImages/{img_id}.jpg'
+        for img_id in img_ids: 
+            filename = f'JPEGImages/{img_id}.png'            #for cityscapes
+            #if img_id[8] == '-':                          #for bdd
+            #    filename = f'JPEGImages/{img_id}.jpg'
+            if str(img_id[0]) == '3':                          #for sim10k
+                filename = f'JPEGImages/{img_id}.jpg'
             xml_path = osp.join(self.img_prefix, 'Annotations',
                                 f'{img_id}.xml')
             tree = ET.parse(xml_path)
             root = tree.getroot()
             size = root.find('size')
+            width = 0
+            height = 0
             if size is not None:
                 width = int(size.find('width').text)
                 height = int(size.find('height').text)
             else:
-                img_path = osp.join(self.img_prefix, 'JPEGImages',
-                                    '{}.jpg'.format(img_id))
+                #img_path = osp.join(self.img_prefix, 'JPEGImages',    #for sim10k
+                #                    '{}.jpg'.format(img_id))  
+                img_path = osp.join(self.img_prefix, 'JPEGImages',     #for cityscapes
+                                    '{}.png'.format(img_id))
                 img = Image.open(img_path)
                 width, height = img.size
             data_infos.append(
@@ -57,26 +64,22 @@ class XMLDataset(CustomDataset):
 
         return data_infos
 
-    def _filter_imgs(self, min_size=32):
-        """Filter images too small or without annotation."""
-        valid_inds = []
-        for i, img_info in enumerate(self.data_infos):
-            if min(img_info['width'], img_info['height']) < min_size:
-                continue
-            if self.filter_empty_gt:
-                img_id = img_info['id']
-                xml_path = osp.join(self.img_prefix, 'Annotations',
-                                    f'{img_id}.xml')
-                tree = ET.parse(xml_path)
-                root = tree.getroot()
-                for obj in root.findall('object'):
-                    name = obj.find('name').text
-                    if name in self.CLASSES:
-                        valid_inds.append(i)
-                        break
-            else:
-                valid_inds.append(i)
-        return valid_inds
+    def get_subset_by_classes(self):
+        """Filter imgs by user-defined categories."""
+        subset_data_infos = []
+        for data_info in self.data_infos:
+            img_id = data_info['id']
+            xml_path = osp.join(self.img_prefix, 'Annotations',
+                                f'{img_id}.xml')
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+            for obj in root.findall('object'):
+                name = obj.find('name').text
+                if name in self.CLASSES:
+                    subset_data_infos.append(data_info)
+                    break
+
+        return subset_data_infos
 
     def get_ann_info(self, idx):
         """Get annotation from XML file by index.
@@ -101,8 +104,7 @@ class XMLDataset(CustomDataset):
             if name not in self.CLASSES:
                 continue
             label = self.cat2label[name]
-            difficult = obj.find('difficult')
-            difficult = 0 if difficult is None else int(difficult.text)
+            difficult = int(obj.find('difficult').text)
             bnd_box = obj.find('bndbox')
             # TODO: check whether it is necessary to use int
             # Coordinates may be float type

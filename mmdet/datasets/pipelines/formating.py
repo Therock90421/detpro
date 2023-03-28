@@ -207,13 +207,6 @@ class DefaultFormatBundle(object):
                 img = np.expand_dims(img, -1)
             img = np.ascontiguousarray(img.transpose(2, 0, 1))
             results['img'] = DC(to_tensor(img), stack=True)
-        if 'img_no_normalize' in results:
-            img = results['img_no_normalize']
-            # add default meta keys
-            if len(img.shape) < 3:
-                img = np.expand_dims(img, -1)
-            img = np.ascontiguousarray(img.transpose(2, 0, 1))
-            results['img_no_normalize'] = DC(to_tensor(img), stack=True)
         for key in ['proposals', 'gt_bboxes', 'gt_bboxes_ignore', 'gt_labels']:
             if key not in results:
                 continue
@@ -347,7 +340,7 @@ class WrapFieldsToLists(object):
         >>>    dict(type='Pad', size_divisor=32),
         >>>    dict(type='ImageToTensor', keys=['img']),
         >>>    dict(type='Collect', keys=['img']),
-        >>>    dict(type='WrapFieldsToLists')
+        >>>    dict(type='WrapIntoLists')
         >>> ]
     """
 

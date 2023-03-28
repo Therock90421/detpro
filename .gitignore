@@ -125,3 +125,4 @@ workdirs
 changelog.py
 
 analysis_results*
+*.tar.bz2

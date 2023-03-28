@@ -18,18 +18,14 @@ class DeltaXYWHBBoxCoder(BaseBBoxCoder):
             delta coordinates
         target_stds (Sequence[float]): Denormalizing standard deviation of
             target for delta coordinates
-        clip_border (bool, optional): Whether clip the objects outside the
-            border of the image. Defaults to True.
     """
 
     def __init__(self,
                  target_means=(0., 0., 0., 0.),
-                 target_stds=(1., 1., 1., 1.),
-                 clip_border=True):
+                 target_stds=(1., 1., 1., 1.)):
         super(BaseBBoxCoder, self).__init__()
         self.means = target_means
         self.stds = target_stds
-        self.clip_border = clip_border
 
     def encode(self, bboxes, gt_bboxes):
         """Get box regression transformation deltas that can be used to
@@ -70,7 +66,7 @@ class DeltaXYWHBBoxCoder(BaseBBoxCoder):
 
         assert pred_bboxes.size(0) == bboxes.size(0)
         decoded_bboxes = delta2bbox(bboxes, pred_bboxes, self.means, self.stds,
-                                    max_shape, wh_ratio_clip, self.clip_border)
+                                    max_shape, wh_ratio_clip)
 
         return decoded_bboxes
 
@@ -94,18 +90,18 @@ def bbox2delta(proposals, gt, means=(0., 0., 0., 0.), stds=(1., 1., 1., 1.)):
             dw, dh.
     """
     assert proposals.size() == gt.size()
-
+    eps=1e-5
     proposals = proposals.float()
     gt = gt.float()
     px = (proposals[..., 0] + proposals[..., 2]) * 0.5
     py = (proposals[..., 1] + proposals[..., 3]) * 0.5
-    pw = proposals[..., 2] - proposals[..., 0]
-    ph = proposals[..., 3] - proposals[..., 1]
+    pw = proposals[..., 2] - proposals[..., 0] + eps
+    ph = proposals[..., 3] - proposals[..., 1] + eps
 
     gx = (gt[..., 0] + gt[..., 2]) * 0.5
     gy = (gt[..., 1] + gt[..., 3]) * 0.5
-    gw = gt[..., 2] - gt[..., 0]
-    gh = gt[..., 3] - gt[..., 1]
+    gw = gt[..., 2] - gt[..., 0] + eps
+    gh = gt[..., 3] - gt[..., 1] + eps
 
     dx = (gx - px) / pw
     dy = (gy - py) / ph
@@ -125,8 +121,7 @@ def delta2bbox(rois,
                means=(0., 0., 0., 0.),
                stds=(1., 1., 1., 1.),
                max_shape=None,
-               wh_ratio_clip=16 / 1000,
-               clip_border=True):
+               wh_ratio_clip=16 / 1000):
     """Apply deltas to shift/scale base boxes.
 
     Typically the rois are anchor or proposed bounding boxes and the deltas are
@@ -143,8 +138,6 @@ def delta2bbox(rois,
             coordinates
         max_shape (tuple[int, int]): Maximum bounds for boxes. specifies (H, W)
         wh_ratio_clip (float): Maximum aspect ratio for boxes.
-        clip_border (bool, optional): Whether clip the objects outside the
-            border of the image. Defaults to True.
 
     Returns:
         Tensor: Boxes with shape (N, 4), where columns represent
@@ -170,11 +163,7 @@ def delta2bbox(rois,
     """
     means = deltas.new_tensor(means).view(1, -1).repeat(1, deltas.size(1) // 4)
     stds = deltas.new_tensor(stds).view(1, -1).repeat(1, deltas.size(1) // 4)
-    try:
-        denorm_deltas = deltas * stds + means
-    except:
-        # print(deltas.shape,stds.shape,means.shape)
-        raise RuntimeError
+    denorm_deltas = deltas * stds + means
     dx = denorm_deltas[:, 0::4]
     dy = denorm_deltas[:, 1::4]
     dw = denorm_deltas[:, 2::4]
@@ -199,7 +188,7 @@ def delta2bbox(rois,
     y1 = gy - gh * 0.5
     x2 = gx + gw * 0.5
     y2 = gy + gh * 0.5
-    if clip_border and max_shape is not None:
+    if max_shape is not None:
         x1 = x1.clamp(min=0, max=max_shape[1])
         y1 = y1.clamp(min=0, max=max_shape[0])
         x2 = x2.clamp(min=0, max=max_shape[1])

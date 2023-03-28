@@ -7,10 +7,10 @@ import torch
 from mmcv import Config, DictAction
 from mmcv.cnn import fuse_conv_bn
 from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
-from mmcv.runner import (get_dist_info, init_dist, load_checkpoint,
-                         wrap_fp16_model)
+from mmcv.runner import get_dist_info, init_dist, load_checkpoint
 
 from mmdet.apis import multi_gpu_test, single_gpu_test
+from mmdet.core import wrap_fp16_model
 from mmdet.datasets import (build_dataloader, build_dataset,
                             replace_ImageToTensor)
 from mmdet.models import build_detector
@@ -60,11 +60,7 @@ def parse_args():
         nargs='+',
         action=DictAction,
         help='override some settings in the used config, the key-value pair '
-        'in xxx=yyy format will be merged into config file. If the value to '
-        'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
-        'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
-        'Note that the quotation marks are necessary and that no white space '
-        'is allowed.')
+        'in xxx=yyy format will be merged into config file.')
     parser.add_argument(
         '--options',
         nargs='+',
@@ -135,10 +131,10 @@ def main():
                 cfg.model.neck.rfp_backbone.pretrained = None
 
     # in case the test dataset is concatenated
-    if isinstance(cfg.data.test, dict):
-        cfg.data.test.test_mode = True
-    elif isinstance(cfg.data.test, list):
-        for ds_cfg in cfg.data.test:
+    if isinstance(cfg.data.val, dict):
+        cfg.data.val.test_mode = True
+    elif isinstance(cfg.data.val, list):
+        for ds_cfg in cfg.data.val:
             ds_cfg.test_mode = True
 
     # init distributed env first, since logger depends on the dist info.
@@ -149,11 +145,11 @@ def main():
         init_dist(args.launcher, **cfg.dist_params)
 
     # build the dataloader
-    samples_per_gpu = cfg.data.test.pop('samples_per_gpu', 1)
+    samples_per_gpu = cfg.data.val.pop('samples_per_gpu', 1)
     if samples_per_gpu > 1:
         # Replace 'ImageToTensor' to 'DefaultFormatBundle'
-        cfg.data.test.pipeline = replace_ImageToTensor(cfg.data.test.pipeline)
-    dataset = build_dataset(cfg.data.test)
+        cfg.data.val.pipeline = replace_ImageToTensor(cfg.data.val.pipeline)
+    dataset = build_dataset(cfg.data.val)
     data_loader = build_dataloader(
         dataset,
         samples_per_gpu=samples_per_gpu,
@@ -175,9 +171,10 @@ def main():
         model.CLASSES = checkpoint['meta']['CLASSES']
     else:
         model.CLASSES = dataset.CLASSES
-
     if not distributed:
         model = MMDataParallel(model, device_ids=[0])
+    #    import pickle
+    #    outputs = pickle.load(open('kitti.pkl','rb'))
         outputs = single_gpu_test(model, data_loader, args.show, args.show_dir,
                                   args.show_score_thr)
     else:
@@ -187,7 +184,6 @@ def main():
             broadcast_buffers=False)
         outputs = multi_gpu_test(model, data_loader, args.tmpdir,
                                  args.gpu_collect)
-
     rank, _ = get_dist_info()
     if rank == 0:
         if args.out:
@@ -199,10 +195,7 @@ def main():
         if args.eval:
             eval_kwargs = cfg.get('evaluation', {}).copy()
             # hard-code way to remove EvalHook args
-            for key in [
-                    'interval', 'tmpdir', 'start', 'gpu_collect', 'save_best',
-                    'rule'
-            ]:
+            for key in ['interval', 'tmpdir', 'start', 'gpu_collect']:
                 eval_kwargs.pop(key, None)
             eval_kwargs.update(dict(metric=args.eval, **kwargs))
             print(dataset.evaluate(outputs, **eval_kwargs))

@@ -11,7 +11,7 @@ class ResLayer(nn.Sequential):
         planes (int): planes of block.
         num_blocks (int): number of blocks.
         stride (int): stride of the first block. Default: 1
-        avg_down (bool): Use AvgPool instead of stride conv when
+        avg_down (bool): Use   instead of stride conv when
             downsampling in the bottleneck. Default: False
         conv_cfg (dict): dictionary to construct and config conv layer.
             Default: None
@@ -38,7 +38,7 @@ class ResLayer(nn.Sequential):
         if stride != 1 or inplanes != planes * block.expansion:
             downsample = []
             conv_stride = stride
-            if avg_down:
+            if avg_down and stride != 1:
                 conv_stride = 1
                 downsample.append(
                     nn.AvgPool2d(

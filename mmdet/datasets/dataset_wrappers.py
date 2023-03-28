@@ -253,7 +253,8 @@ class ClassBalancedDataset(object):
         # 2. For each category c, compute the category-level repeat factor:
         #    r(c) = max(1, sqrt(t/f(c)))
         category_repeat = {
-            cat_id: max(1.0, math.sqrt(repeat_thr / cat_freq))
+            #cat_id: max(1.0, math.sqrt(repeat_thr / cat_freq))
+            cat_id: max(1.0, math.pow(repeat_thr / cat_freq , 2))
             for cat_id, cat_freq in category_freq.items()
         }
 

@@ -6,9 +6,9 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from mmcv.runner import auto_fp16
 from mmcv.utils import print_log
 
+from mmdet.core import auto_fp16
 from mmdet.utils import get_root_logger
 
 
@@ -61,24 +61,20 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
         assert isinstance(imgs, list)
         return [self.extract_feat(img) for img in imgs]
 
+    @abstractmethod
     def forward_train(self, imgs, img_metas, **kwargs):
         """
         Args:
             img (list[Tensor]): List of tensors of shape (1, C, H, W).
                 Typically these should be mean centered and std scaled.
             img_metas (list[dict]): List of image info dict where each dict
-                has: 'img_shape', 'scale_factor', 'flip', and may also contain
+                has: 'img_shape', 'scale_factor', 'flip', and my also contain
                 'filename', 'ori_shape', 'pad_shape', and 'img_norm_cfg'.
                 For details on the values of these keys, see
                 :class:`mmdet.datasets.pipelines.Collect`.
             kwargs (keyword arguments): Specific to concrete implementation.
         """
-        # NOTE the batched image size information may be useful, e.g.
-        # in DETR, this is needed for the construction of masks, which is
-        # then used for the transformer_head.
-        batch_input_shape = tuple(imgs[0].size()[-2:])
-        for img_meta in img_metas:
-            img_meta['batch_input_shape'] = batch_input_shape
+        pass
 
     async def async_simple_test(self, img, img_metas, **kwargs):
         raise NotImplementedError
@@ -121,7 +117,7 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
         else:
             raise NotImplementedError
 
-    def forward_test(self, imgs,imgs_no_normalized, img_metas, **kwargs):
+    def forward_test(self, imgs, img_metas, **kwargs):
         """
         Args:
             imgs (List[Tensor]): the outer list indicates test-time
@@ -140,14 +136,6 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
             raise ValueError(f'num of augmentations ({len(imgs)}) '
                              f'!= num of image meta ({len(img_metas)})')
 
-        # NOTE the batched image size information may be useful, e.g.
-        # in DETR, this is needed for the construction of masks, which is
-        # then used for the transformer_head.
-        for img, img_meta in zip(imgs, img_metas):
-            batch_size = len(img_meta)
-            for img_id in range(batch_size):
-                img_meta[img_id]['batch_input_shape'] = tuple(img.size()[-2:])
-
         if num_augs == 1:
             # proposals (List[List[Tensor]]): the outer list indicates
             # test-time augs (multiscale, flip, etc.) and the inner list
@@ -156,7 +144,7 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
             # proposals.
             if 'proposals' in kwargs:
                 kwargs['proposals'] = kwargs['proposals'][0]
-            return self.simple_test(imgs[0],imgs_no_normalized[0], img_metas[0], **kwargs)
+            return self.simple_test(imgs[0], img_metas[0], **kwargs)
         else:
             assert imgs[0].size(0) == 1, 'aug test does not support ' \
                                          'inference with batch size ' \
@@ -165,8 +153,8 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
             assert 'proposals' not in kwargs
             return self.aug_test(imgs, img_metas, **kwargs)
 
-    @auto_fp16(apply_to=('img','img_no_normalize'))
-    def forward(self, img, img_no_normalize, img_metas, return_loss=True, **kwargs):
+    @auto_fp16(apply_to=('img', ))
+    def forward(self, img, img_metas, return_loss=True, **kwargs):
         """Calls either :func:`forward_train` or :func:`forward_test` depending
         on whether ``return_loss`` is ``True``.
 
@@ -177,9 +165,9 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
         the outer list indicating test time augmentations.
         """
         if return_loss:
-            return self.forward_train(img,img_no_normalize, img_metas, **kwargs)
+            return self.forward_train(img, img_metas, **kwargs)
         else:
-            return self.forward_test(img,img_no_normalize, img_metas, **kwargs)
+            return self.forward_test(img, img_metas, **kwargs)
 
     def _parse_losses(self, losses):
         """Parse the raw outputs (losses) of the network.
@@ -327,10 +315,7 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
             for i in inds:
                 i = int(i)
                 color_mask = color_masks[labels[i]]
-                sg = segms[i]
-                if isinstance(sg, torch.Tensor):
-                    sg = sg.detach().cpu().numpy()
-                mask = sg.astype(bool)
+                mask = segms[i]
                 img[mask] = img[mask] * 0.5 + color_mask * 0.5
         # if out_file specified, do not show image in window
         if out_file is not None:

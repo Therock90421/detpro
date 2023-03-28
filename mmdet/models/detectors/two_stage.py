@@ -75,7 +75,7 @@ class TwoStageDetector(BaseDetector):
         if self.with_rpn:
             self.rpn_head.init_weights()
         if self.with_roi_head:
-            self.roi_head.init_weights(pretrained)
+            self.roi_head.init_weights(pretrained=None)
 
     def extract_feat(self, img):
         """Directly extract features from the backbone+neck."""
@@ -140,7 +140,6 @@ class TwoStageDetector(BaseDetector):
             dict[str, Tensor]: a dictionary of loss components
         """
         x = self.extract_feat(img)
-
         losses = dict()
 
         # RPN forward and loss
@@ -184,26 +183,26 @@ class TwoStageDetector(BaseDetector):
         return await self.roi_head.async_simple_test(
             x, proposal_list, img_meta, rescale=rescale)
 
+    def simple_test(self, img, img_metas, proposals=None, rescale=False):
+        """Test without augmentation."""
+        assert self.with_bbox, 'Bbox head must be implemented.'
+
+        x = self.extract_feat(img)
+        if proposals is None:
+            proposal_list = self.rpn_head.simple_test_rpn(x, img_metas)
+        else:
+            proposal_list = proposals
+
+        return self.roi_head.simple_test(
+            x, proposal_list, img_metas, rescale=rescale)
     def aug_test(self, imgs, img_metas, rescale=False):
         """Test with augmentations.
 
         If rescale is False, then returned bboxes and masks will fit the scale
         of imgs[0].
         """
+        # recompute feats to save memory
         x = self.extract_feats(imgs)
         proposal_list = self.rpn_head.aug_test_rpn(x, img_metas)
         return self.roi_head.aug_test(
             x, proposal_list, img_metas, rescale=rescale)
-
-    def simple_test(self, img, img_no_normalize, img_metas, proposals=None, rescale=False):
-        """Test without augmentation."""
-
-        assert self.with_bbox, 'Bbox head must be implemented.'
-        x = self.extract_feat(img)
-        # if proposals is None:
-        proposal_list = self.rpn_head.simple_test_rpn(x, img_metas)
-        # else:
-        #     proposal_list = proposals
-
-        return self.roi_head.simple_test(
-            x, img, img_no_normalize, proposal_list, img_metas, proposals, rescale=rescale)

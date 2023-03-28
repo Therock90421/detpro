@@ -8,7 +8,7 @@ import warnings
 import mmcv
 import torch
 from mmcv import Config, DictAction
-from mmcv.runner import get_dist_info, init_dist
+from mmcv.runner import init_dist
 from mmcv.utils import get_git_hash
 
 from mmdet import __version__
@@ -16,7 +16,6 @@ from mmdet.apis import set_random_seed, train_detector
 from mmdet.datasets import build_dataset
 from mmdet.models import build_detector
 from mmdet.utils import collect_env, get_root_logger
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
@@ -57,11 +56,7 @@ def parse_args():
         nargs='+',
         action=DictAction,
         help='override some settings in the used config, the key-value pair '
-        'in xxx=yyy format will be merged into config file. If the value to '
-        'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
-        'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
-        'Note that the quotation marks are necessary and that no white space '
-        'is allowed.')
+        'in xxx=yyy format will be merged into config file.')
     parser.add_argument(
         '--launcher',
         choices=['none', 'pytorch', 'slurm', 'mpi'],
@@ -105,22 +100,8 @@ def main():
         # use config filename as default work_dir if cfg.work_dir is None
         cfg.work_dir = osp.join('./work_dirs',
                                 osp.splitext(osp.basename(args.config))[0])
-
-    # auto resume, scan existing file
-    resume_file = ""
-    # if os.path.exists(cfg.work_dir):
-    #     work_dir_files = os.listdir(cfg.work_dir)
-    #     work_dir_files = [f for f in work_dir_files if f.endswith(".pth") and f.split('.')[0] != 'latest']
-    #     if len(work_dir_files)!=0:
-    #         work_dir_files = sorted(work_dir_files, key=lambda y: int(y.split('.')[0].split('_')[-1]), reverse=True)
-    #         resume_file = work_dir_files[0]
     if args.resume_from is not None:
         cfg.resume_from = args.resume_from
-    # auto resume
-    # if args.resume_from is None and resume_file != "":
-        # cfg.resume_from = os.path.join(cfg.work_dir, resume_file)
-        # print("Auto resume from {}".format(cfg.resume_from))
-
     if args.gpu_ids is not None:
         cfg.gpu_ids = args.gpu_ids
     else:
@@ -132,9 +113,6 @@ def main():
     else:
         distributed = True
         init_dist(args.launcher, **cfg.dist_params)
-        # re-set gpu_ids with distributed training mode
-        _, world_size = get_dist_info()
-        cfg.gpu_ids = range(world_size)
 
     # create work_dir
     mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
@@ -167,11 +145,8 @@ def main():
         set_random_seed(args.seed, deterministic=args.deterministic)
     cfg.seed = args.seed
     meta['seed'] = args.seed
-    meta['exp_name'] = osp.basename(args.config)
-
     model = build_detector(
         cfg.model, train_cfg=cfg.train_cfg, test_cfg=cfg.test_cfg)
-    print("model", model)
     datasets = [build_dataset(cfg.data.train)]
     if len(cfg.workflow) == 2:
         val_dataset = copy.deepcopy(cfg.data.val)

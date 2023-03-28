@@ -1,13 +1,8 @@
 from .anchor_free_head import AnchorFreeHead
-from .anchor_free_head_analysis import AnchorFreeHeadAnalysis
 from .anchor_head import AnchorHead
-from .anchor_head_analysis import AnchorHeadAnalysis
 from .atss_head import ATSSHead
-from .cascade_rpn_head import CascadeRPNHead, StageCascadeRPNHead
-from .centripetal_head import CentripetalHead
 from .corner_head import CornerHead
 from .fcos_head import FCOSHead
-from .fcos_head_analysis import FCOSHeadAnalysis
 from .fovea_head import FoveaHead
 from .free_anchor_retina_head import FreeAnchorRetinaHead
 from .fsaf_head import FSAFHead
@@ -21,23 +16,23 @@ from .pisa_retinanet_head import PISARetinaHead
 from .pisa_ssd_head import PISASSDHead
 from .reppoints_head import RepPointsHead
 from .retina_head import RetinaHead
-from .retina_head_analysis import RetinaHeadAnalysis
 from .retina_sepbn_head import RetinaSepBNHead
 from .rpn_head import RPNHead
 from .sabl_retina_head import SABLRetinaHead
 from .ssd_head import SSDHead
-from .transformer_head import TransformerHead
-from .vfnet_head import VFNetHead
-from .yolact_head import YOLACTHead, YOLACTProtonet, YOLACTSegmHead
 from .yolo_head import YOLOV3Head
 
+from .da_anchor_free_head import DAAnchorFreeHead
+from .da_reppoints_head import DARepPointsHead
+from .da_anchor_head import DAAnchorHead
+from .da_rpn_head import DARPNHead
+
 __all__ = [
-    'AnchorFreeHead', 'AnchorFreeHeadAnalysis', 'AnchorHead', 'AnchorHeadAnalysis', 'GuidedAnchorHead', 'FeatureAdaption',
-    'RPNHead', 'GARPNHead', 'RetinaHead', 'RetinaHeadAnalysis', 'RetinaSepBNHead', 'GARetinaHead',
-    'SSDHead', 'FCOSHead', 'FCOSHeadAnalysis', 'RepPointsHead', 'FoveaHead',
+    'AnchorFreeHead', 'AnchorHead', 'GuidedAnchorHead', 'FeatureAdaption',
+    'RPNHead', 'GARPNHead', 'RetinaHead', 'RetinaSepBNHead', 'GARetinaHead',
+    'SSDHead', 'FCOSHead', 'RepPointsHead', 'FoveaHead',
     'FreeAnchorRetinaHead', 'ATSSHead', 'FSAFHead', 'NASFCOSHead',
-    'PISARetinaHead', 'PISASSDHead', 'GFLHead', 'CornerHead', 'YOLACTHead',
-    'YOLACTSegmHead', 'YOLACTProtonet', 'YOLOV3Head', 'PAAHead',
-    'SABLRetinaHead', 'CentripetalHead', 'VFNetHead', 'TransformerHead',
-    'StageCascadeRPNHead', 'CascadeRPNHead'
+    'PISARetinaHead', 'PISASSDHead', 'GFLHead', 'CornerHead', 'PAAHead',
+    'YOLOV3Head', 'SABLRetinaHead', 'DAAnchorFreeHead', 'DARepPointsHead',
+    'DARPNHead', 'DAAnchorHead'
 ]
