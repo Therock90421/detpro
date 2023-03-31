@@ -45,7 +45,7 @@ This repo is built on [mmdetection](https://github.com/open-mmlab/mmdetection), 
 ```shell
 pip install -r requirements/build.txt
 pip install -e .
-pip install git+https://github.com/openai/CLIP.git
+pip install git+https://github.com/openai/CLIP.git #pip install git://www.github.com/openai/CLIP.git
 pip uninstall pycocotools -y
 pip uninstall mmpycocotools -y
 pip install mmpycocotools

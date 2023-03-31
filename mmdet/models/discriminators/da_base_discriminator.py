@@ -36,4 +36,5 @@ class DABaseDiscriminator(nn.Module, metaclass=ABCMeta):
         outs, tempt = self(x) #discriminator.forward()
         #loss_inputs = outs + (gt_domains)
         losses = self.loss(outs, gt_domains)
+
         return losses

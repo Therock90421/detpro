@@ -3,8 +3,8 @@ dataset_type = 'VOCCityscapesDataset'
 data_root_s = 'data/cityscapes_voc/'
 data_root_t = 'data/foggy_cityscapes_voc/'
 #data_root_t = 'data/cityscapes_voc/'
-data_test = 'data/foggy_cityscapes_voc/'
-#data_test = 'data/cityscapes_voc/'
+#data_test = 'data/foggy_cityscapes_voc/'
+data_test = 'data/cityscapes_voc/'
 classes = ('person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle',
            'bicycle' )
 img_norm_cfg = dict(
@@ -89,7 +89,7 @@ data_t = dict(
         pipeline=test_pipeline))
 '''
 data_s = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=2,
     workers_per_gpu=2,#2,
     train=dict(
         type='ClassBalancedDataset',
@@ -115,7 +115,7 @@ data_s = dict(
         pipeline=test_pipeline))
 
 data_t = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=2,
     workers_per_gpu=2,#2,
     train=dict(
         type='ClassBalancedDataset',

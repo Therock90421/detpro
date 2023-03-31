@@ -117,7 +117,7 @@ test_cfg = dict(
 dataset_type = 'VOCCityscapesDataset'
 data_root_s = 'data/cityscapes_voc/'
 data_root_t = 'data/foggy_cityscapes_voc/'
-data_test = 'data/foggy_cityscapes_voc/'
+data_test = 'data/cityscapes_voc/'
 classes = ('person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle',
            'bicycle')
 img_norm_cfg = dict(
@@ -156,7 +156,7 @@ test_pipeline = [
         ])
 ]
 data_s = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=2,
     workers_per_gpu=2,
     train=dict(
         type='ClassBalancedDataset',
@@ -233,7 +233,7 @@ data_s = dict(
                 ])
         ]))
 data_t = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=2,
     workers_per_gpu=2,
     train=dict(
         type='ClassBalancedDataset',
@@ -263,8 +263,8 @@ data_t = dict(
         type='VOCCityscapesDataset',
         classes=('person', 'rider', 'car', 'truck', 'bus', 'train',
                  'motorcycle', 'bicycle'),
-        ann_file='data/foggy_cityscapes_voc/VOC2007/ImageSets/Main/test.txt',
-        img_prefix='data/foggy_cityscapes_voc/VOC2007/',
+        ann_file='data/cityscapes_voc/VOC2007/ImageSets/Main/test.txt',
+        img_prefix='data/cityscapes_voc/VOC2007/',
         pipeline=[
             dict(type='LoadImageFromFile'),
             dict(
@@ -288,8 +288,8 @@ data_t = dict(
         type='VOCCityscapesDataset',
         classes=('person', 'rider', 'car', 'truck', 'bus', 'train',
                  'motorcycle', 'bicycle'),
-        ann_file='data/foggy_cityscapes_voc/VOC2007/ImageSets/Main/test.txt',
-        img_prefix='data/foggy_cityscapes_voc/VOC2007/',
+        ann_file='data/cityscapes_voc/VOC2007/ImageSets/Main/test.txt',
+        img_prefix='data/cityscapes_voc/VOC2007/',
         pipeline=[
             dict(type='LoadImageFromFile'),
             dict(
