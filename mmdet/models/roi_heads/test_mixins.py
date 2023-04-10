@@ -2,6 +2,7 @@ import logging
 import sys
 
 import torch
+import torch.nn.functional as F
 
 from mmdet.core import (bbox2roi, bbox_mapping, merge_aug_bboxes,
                         merge_aug_masks, multiclass_nms)
@@ -54,19 +55,30 @@ class BBoxTestMixin(object):
                            img_metas,
                            proposals,
                            rcnn_test_cfg,
+                           text_embedding = None,
                            rescale=False):
         """Test only det bboxes without augmentation."""
         rois = bbox2roi(proposals)
-        bbox_results = self._bbox_forward(x, rois)
+        bbox_results = self._bbox_forward(x, rois, text_embedding, is_source = False)
         img_shapes = tuple(meta['img_shape'] for meta in img_metas)
         scale_factors = tuple(meta['scale_factor'] for meta in img_metas)
 
         # split batch bbox prediction back to each image
         cls_score = bbox_results['cls_score']
         bbox_pred = bbox_results['bbox_pred']
+        #####################################################
+        #clip_across_domain = bbox_results['clip_across_dm']
+        #C = int(clip_across_domain.shape[1]/2)
+        #clip_target_domain = clip_across_domain[:,C:]
+        #clip_target_domain = clip_across_domain[:,:C]
+        #clip_target_domain = F.softmax(clip_target_domain, dim=1)
+        #####################################################
         num_proposals_per_img = tuple(len(p) for p in proposals)
         rois = rois.split(num_proposals_per_img, 0)
         cls_score = cls_score.split(num_proposals_per_img, 0)
+        ####################################################
+        #clip_score = clip_target_domain.split(num_proposals_per_img, 0)
+        ####################################################
         # some detector with_reg is False, bbox_pred will be None
         bbox_pred = bbox_pred.split(
             num_proposals_per_img,
@@ -75,10 +87,14 @@ class BBoxTestMixin(object):
         # apply bbox post-processing to each image individually
         det_bboxes = []
         det_labels = []
+        #clip_bboxes = []
+        #clip_labels = []
         for i in range(len(proposals)):
             det_bbox, det_label = self.bbox_head.get_bboxes(
+            #det_bbox, det_label, clip_bbox, clip_label = self.bbox_head.get_bboxes_with_CLIP(
                 rois[i],
                 cls_score[i],
+             #   clip_score[i],
                 bbox_pred[i],
                 img_shapes[i],
                 scale_factors[i],
@@ -86,6 +102,9 @@ class BBoxTestMixin(object):
                 cfg=rcnn_test_cfg)
             det_bboxes.append(det_bbox)
             det_labels.append(det_label)
+            #clip_bboxes.append(clip_bbox)
+            #clip_labels.append(clip_label)
+        #return det_bboxes, det_labels, clip_bboxes, clip_labels
         return det_bboxes, det_labels
 
     def aug_test_bboxes(self, feats, img_metas, proposal_list, rcnn_test_cfg):

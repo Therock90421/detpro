@@ -41,6 +41,10 @@ class DAOptimizerHook(DAHook):
             runner.optimizer.zero_grad()
         #print('backward begin')
         runner.outputs['loss'].backward()
+        ####################################
+        #for name, param in runner.model.named_parameters():
+        #    if name == 'module.DAPromptHead.prompt_learner.ctx_di':
+        #        print('ctx_di.grad', param.grad)
         #print('backward end')
         if self.grad_clip is not None:
             grad_norm = self.clip_grads(runner.model.parameters())

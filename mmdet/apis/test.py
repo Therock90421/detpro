@@ -70,12 +70,15 @@ def da_single_gpu_test(model,
                        show_score_thr=0.3):
     model.eval()
     results = []
+    results_clip = []
     dataset = data_loader.dataset
     prog_bar = mmcv.ProgressBar(len(dataset))
     for i, data in enumerate(data_loader):
         with torch.no_grad():
             data.update({'domain': torch.tensor([1]).to('cuda:0')})
+            # result of ROIHead
             result = model(data, return_loss=False, rescale=True)
+            #result, result_clip = model(data, return_loss=False, rescale=True)
         batch_size = len(result)
         if show or out_dir:
             if batch_size == 1 and isinstance(data['img'][0], torch.Tensor):
@@ -110,9 +113,16 @@ def da_single_gpu_test(model,
             result = [(bbox_results, encode_mask_results(mask_results))
                       for bbox_results, mask_results in result]
         results.extend(result)
+        ###########################
+        #if isinstance(result_clip[0], tuple):
+        #    result = [(bbox_results, encode_mask_results(mask_results))
+        #              for bbox_results, mask_results in result_clip]
+        #results_clip.extend(result_clip)
 
         for _ in range(batch_size):
             prog_bar.update()
+    #####################################
+    #return results, results_clip
     return results
 
 def da_multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False):

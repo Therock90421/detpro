@@ -3,6 +3,8 @@ from mmcv.cnn import ConvModule
 
 from mmdet.models.builder import HEADS
 from .bbox_head import BBoxHead
+import torch
+import numpy as np
 
 
 @HEADS.register_module()
@@ -49,6 +51,7 @@ class ConvFCBBoxHead(BBoxHead):
         self.fc_out_channels = fc_out_channels
         self.conv_cfg = conv_cfg
         self.norm_cfg = norm_cfg
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
         # add shared convs and fcs
         self.shared_convs, self.shared_fcs, last_layer_dim = \
@@ -132,7 +135,7 @@ class ConvFCBBoxHead(BBoxHead):
                     nn.init.xavier_uniform_(m.weight)
                     nn.init.constant_(m.bias, 0)
 
-    def forward(self, x):
+    def forward(self, x, text_embedding=None, is_source=False):
         # shared part
         if self.num_shared_convs > 0:
             for conv in self.shared_convs:
@@ -168,9 +171,29 @@ class ConvFCBBoxHead(BBoxHead):
         for fc in self.reg_fcs:
             x_reg = self.relu(fc(x_reg))
 
-        cls_score = self.fc_cls(x_cls) if self.with_cls else None
+        #[*, C+1], 其中C是类别数，+1是背景
+        #cls_score = self.fc_cls(x_cls) if self.with_cls else None
+        # Clip adaptation
+        # normalized features
+        # x_cls = [*, 1024]
+        
+        x_cls = x_cls / x_cls.norm(dim=1, keepdim=True)
+        # cosine similarity as logits
+        # text_embedding [domain * (cls + 1), 1024]
+        logit_scale = self.logit_scale.exp()
+        # [*, domain * (cls + 1)]
+        logits_across_domains = logit_scale * x_cls @ text_embedding.t()
+        cls_score = logits_across_domains
+        #if is_source:
+        #    logits_inside_domain = logits_across_domains[:, :self.num_classes + 1]
+        #    print(logits_inside_domain.shape)
+        #else:
+        #    logits_inside_domain = logits_across_domains[:, self.num_classes + 1:]
+        
         bbox_pred = self.fc_reg(x_reg) if self.with_reg else None
-        return cls_score, bbox_pred
+        return cls_score, bbox_pred#, logits_across_domains#, logits_inside_domain
+        #return cls_score, bbox_pred
+
 
 
 @HEADS.register_module()

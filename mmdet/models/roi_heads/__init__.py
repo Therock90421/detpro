@@ -15,6 +15,7 @@ from .roi_extractors import SingleRoIExtractor
 from .shared_heads import ResLayer
 from .standard_roi_head import StandardRoIHead
 from .da_standard_roi_head import DAStandardRoIHead
+from .da_clip_standard_roi_head import DAClipStandardRoIHead
 
 __all__ = [
     'BaseRoIHead', 'CascadeRoIHead', 'DoubleHeadRoIHead', 'MaskScoringRoIHead',
@@ -23,5 +24,5 @@ __all__ = [
     'Shared4Conv1FCBBoxHead', 'DoubleConvFCBBoxHead', 'FCNMaskHead',
     'HTCMaskHead', 'FusedSemanticHead', 'GridHead', 'MaskIoUHead',
     'SingleRoIExtractor', 'PISARoIHead', 'PointRendRoIHead', 'MaskPointHead',
-    'CoarseMaskHead', 'DynamicRoIHead', 'DAStandardRoIHead'
+    'CoarseMaskHead', 'DynamicRoIHead', 'DAStandardRoIHead', 'DAClipStandardRoIHead'
 ]

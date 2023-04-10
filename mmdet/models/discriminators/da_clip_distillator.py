@@ -7,7 +7,8 @@ from mmdet.core import (PointGenerator, build_assigner, build_sampler,
                         images_to_levels, multi_apply, multiclass_nms, unmap)
 from ..builder import DISCRIMINATORS, build_loss
 from .da_base_discriminator import DABaseDiscriminator
-from mmdet.utils import GradReverse
+import torch.nn.functional as F
+
 
 
 @DISCRIMINATORS.register_module()
@@ -41,7 +42,6 @@ class DAClipDistillator(DABaseDiscriminator):
         self.sigmoid = nn.Sigmoid()
         self.cls_domain = nn.ModuleList()
         self.mse = nn.MSELoss()
-        self.gradreverse = GradReverse(1)
         for i, channels in enumerate([[self.in_channels, self.in_channels], 
                                       [self.in_channels, int(self.in_channels/2)], 
                                       [int(self.in_channels/2), 1]]):
@@ -62,7 +62,7 @@ class DAClipDistillator(DABaseDiscriminator):
         """Initialize weights of the head."""
         for m in self.cls_domain:
             normal_init(m.conv, std=0.01)
-
+    '''
     def forward(self, feats):
         return multi_apply(self.forward_single, feats)
 
@@ -76,21 +76,40 @@ class DAClipDistillator(DABaseDiscriminator):
         feat_dis_scores = self.sigmoid(dis_feat)
 
         return feat_dis_scores, torch.tensor([0])
-
-    def loss_single(self, feat_dis_scores, gt_domain):
+    '''
+    def loss_single(self, backbone_feature, clip_feature):
         # feature domain classification loss
-        feat_loss = 10*self.mse(torch.mean(feat_dis_scores), gt_domain[0].float())
-        return feat_loss, torch.tensor([0])
+        #feat_loss = 10*self.mse(torch.mean(feat_dis_scores), gt_domain[0].float())
+        kd_loss = F.l1_loss(backbone_feature, clip_feature)
+        return kd_loss, torch.tensor([0])
 
     def loss(self,
-             feat_dis_scores,
-             gt_domains):
+             backbone_features,
+             clip_features):
         # compute loss
-        gt_domains = [gt_domains for i in range(5)]
         loss_feat, tempt = multi_apply(
         self.loss_single,
-        feat_dis_scores,
-        gt_domains)
+        backbone_features,
+        clip_features)
         loss_dict_all = {
-            'loss_feat': loss_feat}
+            'loss_kd': loss_feat}
         return loss_dict_all
+
+    def forward_train(self,
+                      x,
+                      y,
+                      **kwargs):
+        """
+        Args:
+            x (list[Tensor]): Features from FPN.
+            img_metas (list[dict]): Meta information of each image, e.g.,
+                image size, scaling factor, etc.
+            gt_labels (Tensor): Ground truth labels of each box,
+                shape (num_gts,).
+        Returns:
+            tuple:
+                losses: (dict[str, Tensor]): A dictionary of loss components.
+        """
+        losses = self.loss(x, y)
+
+        return losses

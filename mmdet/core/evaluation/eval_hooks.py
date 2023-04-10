@@ -215,7 +215,12 @@ class DAEvalHook(DAHook):
         if not self.evaluation_flag(runner):
             return
         from mmdet.apis import da_single_gpu_test
+        ###########################################################
         results = da_single_gpu_test(runner.model, self.dataloader, show=False)
+        #if len(results) > 1:
+        #    for result in results:
+        #        self.evaluate(runner, result)   
+        #else:
         self.evaluate(runner, results)
     """
     def before_train_epoch(self, runner):

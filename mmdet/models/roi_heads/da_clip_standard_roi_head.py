@@ -7,7 +7,7 @@ from .test_mixins import BBoxTestMixin, MaskTestMixin
 
 
 @HEADS.register_module()
-class DAStandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
+class DAClipStandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
     """Simplest base roi head including one bbox head and one mask head."""
 
     def init_assigner_sampler(self):
@@ -73,6 +73,8 @@ class DAStandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
                       proposal_list,
                       gt_bboxes,
                       gt_labels,
+                      text_embedding,
+                      is_source,
                       gt_bboxes_ignore=None,
                       gt_masks=None):
         """
@@ -118,8 +120,11 @@ class DAStandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         if self.with_bbox:
             bbox_results = self._bbox_forward_train(x, sampling_results,
                                                     gt_bboxes, gt_labels,
-                                                    img_metas)
+                                                    img_metas,
+                                                    text_embedding, is_source)
             losses.update(bbox_results['loss_bbox'])
+            ###############################################
+            losses.update(bbox_results['loss_clip'])
 
         # mask head forward and loss
         if self.with_mask:
@@ -132,7 +137,7 @@ class DAStandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
 
         return losses, bbox_results['bbox_feats']
 
-    def _bbox_forward(self, x, rois):
+    def _bbox_forward(self, x, rois, text_embedding, is_source):
         """Box head forward function used in both training and testing."""
         # TODO: a more flexible way to decide which feature maps to use
         bbox_feats = self.bbox_roi_extractor(
@@ -140,25 +145,34 @@ class DAStandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         # [*, 256, 7, 7]
         if self.with_shared_head:
             bbox_feats = self.shared_head(bbox_feats)
-        cls_score, bbox_pred = self.bbox_head(bbox_feats)
+        cls_score, bbox_pred = self.bbox_head(bbox_feats, text_embedding, is_source)
+        #cls_score, bbox_pred, clip_across_dm = self.bbox_head(bbox_feats, text_embedding, is_source)
+        if not self.training:
+            if is_source:
+                cls_score = cls_score[:, :int(cls_score.shape[1]/2)]
+            else:
+                cls_score = cls_score[:, int(cls_score.shape[1]/2):]
 
         bbox_results = dict(
             cls_score=cls_score, bbox_pred=bbox_pred, bbox_feats=bbox_feats)
+            #clip_across_dm=clip_across_dm)
         return bbox_results
 
     def _bbox_forward_train(self, x, sampling_results, gt_bboxes, gt_labels,
-                            img_metas):
+                            img_metas, text_embedding, is_source):
         """Run forward function and calculate loss for box head in training."""
         rois = bbox2roi([res.bboxes for res in sampling_results])
-        bbox_results = self._bbox_forward(x, rois)
+        bbox_results = self._bbox_forward(x, rois, text_embedding, is_source)
 
         bbox_targets = self.bbox_head.get_targets(sampling_results, gt_bboxes,
                                                   gt_labels, self.train_cfg)
-        loss_bbox = self.bbox_head.loss(bbox_results['cls_score'],
+        loss_bbox = self.bbox_head.loss(None,
                                         bbox_results['bbox_pred'], rois,
                                         *bbox_targets)
+        loss_clip = self.bbox_head.clip_loss(bbox_results['cls_score'], is_source, *bbox_targets)
 
         bbox_results.update(loss_bbox=loss_bbox)
+        bbox_results.update(loss_clip=loss_clip)
         return bbox_results
 
     def _mask_forward_train(self, x, sampling_results, bbox_feats, gt_masks,
@@ -245,19 +259,28 @@ class DAStandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
                     x,
                     proposal_list,
                     img_metas,
+                    text_embedding,
                     proposals=None,
                     rescale=False):
         """Test without augmentation."""
         assert self.with_bbox, 'Bbox head must be implemented.'
 
         det_bboxes, det_labels = self.simple_test_bboxes(
-            x, img_metas, proposal_list, self.test_cfg, rescale=rescale)
+        #det_bboxes, det_labels, clip_bboxes, clip_labels = self.simple_test_bboxes(
+            x, img_metas, proposal_list, self.test_cfg, text_embedding, rescale=rescale)
         bbox_results = [
             bbox2result(det_bboxes[i], det_labels[i],
                         self.bbox_head.num_classes)
             for i in range(len(det_bboxes))
         ]
+        #################################################
+        #clip_results = [
+        #    bbox2result(clip_bboxes[i], clip_labels[i],
+        #                self.bbox_head.num_classes)
+        #    for i in range(len(det_bboxes))
+        #]
         if not self.with_mask:
+            #return bbox_results, clip_results
             return bbox_results
         else:
             segm_results = self.simple_test_mask(

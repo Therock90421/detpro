@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.utils import _pair
+import torch.nn.functional as F
 
 from mmdet.core import (auto_fp16, build_bbox_coder, force_fp32, multi_apply,
                         multiclass_nms)
@@ -148,6 +149,7 @@ class BBoxHead(nn.Module):
              bbox_weights,
              reduction_override=None):
         losses = dict()
+        # label [*, 9]
         if cls_score is not None:
             avg_factor = max(torch.sum(label_weights > 0).float().item(), 1.)
             if cls_score.numel() > 0:
@@ -196,6 +198,7 @@ class BBoxHead(nn.Module):
         if isinstance(cls_score, list):
             cls_score = sum(cls_score) / float(len(cls_score))
         scores = F.softmax(cls_score, dim=1) if cls_score is not None else None
+
 
         if bbox_pred is not None:
             bboxes = self.bbox_coder.decode(
@@ -332,3 +335,104 @@ class BBoxHead(nn.Module):
             new_rois = torch.cat((rois[:, [0]], bboxes), dim=1)
 
         return new_rois
+    
+    ##################################################
+    @force_fp32(apply_to=('clip_across_dm'))
+    # loss还可以补充，用目标域输入时，不区分类别的loss；或者使用CLIP的文本prompt生成伪标签
+    def clip_loss(self,
+             clip_across_dm,
+             is_source,
+             labels,
+             label_weights,
+             bbox_targets,
+             bbox_weights,
+             reduction_override=None):
+        losses = dict()
+        # label [*, 9]
+        C = int(clip_across_dm.shape[1] / 2)
+        C_labels = labels + C
+        # across_domain_loss 在两个域的所有类别上计算，包括背景*2
+        if clip_across_dm is not None:
+            avg_factor = max(torch.sum(label_weights > 0).float().item(), 1.)
+            #clip_across_dm = F.softmax(clip_across_dm, dim=1)
+            if clip_across_dm.numel() > 0:
+                if is_source:
+                    losses['loss_clip_across_domains'] = self.loss_cls(
+                        clip_across_dm,
+                        labels,
+                        label_weights,
+                        avg_factor=avg_factor,
+                        reduction_override=reduction_override)
+                else:
+                    losses['loss_clip_across_domains'] = self.loss_cls(
+                        clip_across_dm,
+                        C_labels,
+                        label_weights,
+                        avg_factor=avg_factor,
+                        reduction_override=reduction_override)
+                # inside_domain_loss 只在域内的所有类别上计算，包括背景
+                #clip_source_domain = F.softmax(clip_across_dm[:, :C], dim=1)
+                #clip_target_domain = F.softmax(clip_across_dm[:, C:], dim=1)
+                clip_source_domain = clip_across_dm[:, :C]
+                clip_target_domain = clip_across_dm[:, C:]
+                losses['loss_clip_source_domains'] = self.loss_cls(
+                        clip_source_domain,
+                        labels,
+                        label_weights,
+                        avg_factor=avg_factor,
+                        reduction_override=reduction_override)
+                losses['loss_clip_target_domains'] = self.loss_cls(
+                        clip_target_domain,
+                        labels,
+                        label_weights,
+                        avg_factor=avg_factor,
+                        reduction_override=reduction_override)
+
+        return losses
+    
+    @force_fp32(apply_to=('cls_score', 'clip_score', 'bbox_pred'))
+    def get_bboxes_with_CLIP(self,
+                   rois,
+                   cls_score,
+                   clip_score,
+                   bbox_pred,
+                   img_shape,
+                   scale_factor,
+                   rescale=False,
+                   cfg=None):
+        if isinstance(cls_score, list):
+            cls_score = sum(cls_score) / float(len(cls_score))
+            clip_score = sum(clip_score) / float(len(clip_score))
+        scores = F.softmax(cls_score, dim=1) if cls_score is not None else None
+        #clip_score = F.softmax(cls_score, dim=1) if cls_score is not None else None
+
+
+        if bbox_pred is not None:
+            bboxes = self.bbox_coder.decode(
+                rois[:, 1:], bbox_pred, max_shape=img_shape)
+        else:
+            bboxes = rois[:, 1:].clone()
+            if img_shape is not None:
+                bboxes[:, [0, 2]].clamp_(min=0, max=img_shape[1])
+                bboxes[:, [1, 3]].clamp_(min=0, max=img_shape[0])
+
+        if rescale and bboxes.size(0) > 0:
+            if isinstance(scale_factor, float):
+                bboxes /= scale_factor
+            else:
+                scale_factor = bboxes.new_tensor(scale_factor)
+                bboxes = (bboxes.view(bboxes.size(0), -1, 4) /
+                          scale_factor).view(bboxes.size()[0], -1)
+
+        if cfg is None:
+            return bboxes, scores, clip_score
+        else:
+            det_bboxes, det_labels = multiclass_nms(bboxes, scores,
+                                                    cfg.score_thr, cfg.nms,
+                                                    cfg.max_per_img)
+            clip_bboxes, clip_labels = multiclass_nms(bboxes, clip_score,
+                                                    cfg.score_thr, cfg.nms,
+                                                    cfg.max_per_img)
+            quit()
+
+            return det_bboxes, det_labels, clip_bboxes, clip_labels

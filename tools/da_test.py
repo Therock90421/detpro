@@ -207,24 +207,38 @@ def main():
         outputs = multi_gpu_test(model, data_loader_s, args.tmpdir,
                                  args.gpu_collect)
     rank, _ = get_dist_info()
-    if rank == 0:
-        if args.out:
-            print(f'\nwriting results to {args.out}')
-            mmcv.dump(outputs_t, args.out)
-            #mmcv.dump(outputs_s, "source.pkl")
-        kwargs = {} if args.eval_options is None else args.eval_options
-        if args.format_only:
-            #dataset_s.format_results(outputs_s, **kwargs)
-            dataset_t.format_results(outputs_t, **kwargs)
-        if args.eval:
-            eval_kwargs = cfg.get('evaluation', {}).copy()
-            # hard-code way to remove EvalHook args
-            for key in ['interval', 'tmpdir', 'start', 'gpu_collect']:
-                eval_kwargs.pop(key, None)
-            eval_kwargs.update(dict(metric=args.eval, **kwargs))
-     #       print(dataset_s.evaluate(outputs_s, **eval_kwargs))
-            print(dataset_t.evaluate(outputs_t, **eval_kwargs))
-
-
+    if len(outputs_t) > 1:
+        for output_t in outputs_t:
+            if rank == 0:
+                if args.out:
+                    print(f'\nwriting results to {args.out}')
+                    mmcv.dump(output_t, args.out)
+                    #mmcv.dump(outputs_s, "source.pkl")
+                kwargs = {} if args.eval_options is None else args.eval_options
+                if args.format_only:
+                    dataset_t.format_results(output_t, **kwargs)
+                if args.eval:
+                    eval_kwargs = cfg.get('evaluation', {}).copy()
+                    # hard-code way to remove EvalHook args
+                    for key in ['interval', 'tmpdir', 'start', 'gpu_collect']:
+                        eval_kwargs.pop(key, None)
+                    eval_kwargs.update(dict(metric=args.eval, **kwargs))
+                    print(dataset_t.evaluate(output_t, **eval_kwargs))
+    else: 
+        if rank == 0:
+                if args.out:
+                    print(f'\nwriting results to {args.out}')
+                    mmcv.dump(outputs_t, args.out)
+                    #mmcv.dump(outputs_s, "source.pkl")
+                kwargs = {} if args.eval_options is None else args.eval_options
+                if args.format_only:
+                    dataset_t.format_results(outputs_t, **kwargs)
+                if args.eval:
+                    eval_kwargs = cfg.get('evaluation', {}).copy()
+                    # hard-code way to remove EvalHook args
+                    for key in ['interval', 'tmpdir', 'start', 'gpu_collect']:
+                        eval_kwargs.pop(key, None)
+                    eval_kwargs.update(dict(metric=args.eval, **kwargs))
+                    print(dataset_t.evaluate(outputs_t, **eval_kwargs))
 if __name__ == '__main__':
     main()

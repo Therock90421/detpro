@@ -157,7 +157,7 @@ def train_detector(model,
     runner.run(data_loaders, cfg.workflow, cfg.total_epochs)
 
 
-def  da_train_detector(model,
+def da_train_detector(model,
                       dataset_s,
                       dataset_t,
                       cfg,

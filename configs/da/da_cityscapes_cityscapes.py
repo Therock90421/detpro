@@ -5,6 +5,7 @@
 #]
 _base_ = [
     '../_base_/models/da_clip_rcnn_r50_fpn.py',
+    #'../_base_/models/da_faster_rcnn_r50_fpn.py',
     '../_base_/datasets/da_cityscapes_cityscapes_voc_detection.py',
     '../_base_/da_default_runtime.py'
 ]

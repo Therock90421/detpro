@@ -6,6 +6,9 @@ from ..builder import DETECTORS, build_backbone, build_head, build_neck, build_d
 from .da_base import DABaseDetector
 from mmdet.utils import convert_splitbn_model 
 import clip
+import torch.nn.functional as F
+from .da_clip_prompt_head import DAPromptHead
+
 
 
 @DETECTORS.register_module()
@@ -30,14 +33,31 @@ class DAClipDetector(DABaseDetector):
         super(DAClipDetector, self).__init__()
         self.auxBN = backbone['type'] == 'AuxResNet'
         ##########################################
-        self.backbone = build_backbone(backbone)
+        #self.backbone = build_backbone(backbone)
         #self.clip_model, self.preprocess = clip.load('ViT-B/32', device, jit=False)
         #['RN50', 'RN101', 'RN50x4', 'RN50x16', 'RN50x64', 'ViT-B/32', 'ViT-B/16', 'ViT-L/14', 'ViT-L/14@336px']
         self.clip_model, self.preprocess = clip.load('RN50', 'cuda', jit=False)
         self.clip_model.eval()
-        for child in self.clip_model.children():
-            for param in child.parameters():
-                param.requires_grad = False
+        for params in self.clip_model.parameters():
+            params.requires_grad_(False)
+        #for name, param in self.clip_model.named_parameters():
+        #    print(name, param.requires_grad)
+        #self.DAPrompt = DAPromptHead(('person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle',
+        #   'bicycle'), self.clip_model).get_embedding()
+        #self.DAPromptHead = DAPromptHead(('Pedestrians and vehicles',), self.clip_model)
+        # 增加一个背景类别
+        self.DAPromptHead = DAPromptHead(('person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle',
+           'bicycle', 'background'), self.clip_model)
+
+
+        '''
+        for param in self.clip_model.visual.layer4.parameters():
+            param.requires_grad = True
+        for param in self.clip_model.visual.layer3.parameters():
+            param.requires_grad = True
+        for param in self.clip_model.visual.layer2.parameters():
+            param.requires_grad = True
+        '''
         ##########################################
 #        if self.auxBN:
 #            self.backbone = convert_splitbn_model(self.backbone)
@@ -61,8 +81,6 @@ class DAClipDetector(DABaseDetector):
         
         if feat_dis_head is not None:
             self.feat_dis_head = build_discriminator(feat_dis_head)
-            Clip_dis_head = {'type': 'DAClipDistillator', 'in_channels': 256}
-            self.clip_distillation_head = build_discriminator(Clip_dis_head)
         else:
             self.feat_dis_head = None
         if ins_dis_head is not None:
@@ -100,7 +118,9 @@ class DAClipDetector(DABaseDetector):
                 Defaults to None.
         """
         super(DAClipDetector, self).init_weights(pretrained)
+        ###############################################################
         #self.backbone.init_weights(pretrained=pretrained)
+        ###############################################################
         if self.with_neck:
             if isinstance(self.neck, nn.Sequential):
                 for m in self.neck:
@@ -117,18 +137,28 @@ class DAClipDetector(DABaseDetector):
         if self.auxBN:
             x = self.backbone(img, domain)
         else:
-            #################################
-            x = self.backbone(img)
-            #################################
-        if self.with_neck:
-            x = self.neck(x)
+            #x = self.backbone(img)
+            x = self.clip_model.encode_image(img)
+        #################################
+        '''
         if self.training:
+            loss_kd = []
             clip_x = self.clip_model.encode_image(img)
-            if self.with_neck:
-                clip_x = self.neck(clip_x)
-            #clip_x = clip_x.detach()
-            clip_tuple = tuple(i.detach() for i in clip_x)
-            return x, clip_tuple
+            for i, (feat_x, feat_clip) in enumerate(zip(x, clip_x)):
+                if i == 0:
+                    continue
+                N, C, H, W = feat_clip.shape
+                loss_kd.append(F.l1_loss(feat_x, feat_clip))
+            loss_kd = torch.mean(torch.stack(loss_kd), dim=0)
+        '''
+        #################################
+
+        if self.with_neck:
+            x = self.neck(x)                
+        #################################
+        #if self.training:
+        #    return x, loss_kd
+        #################################
         return x
 
     def forward_dummy(self, img):
@@ -190,30 +220,37 @@ class DAClipDetector(DABaseDetector):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
+        ####################################################################
+        #self.DAPrompt = self.DAPromptHead.get_embedding() #[domains * (cls + 1), 1024]->[domains * (cls + 1), 256]
+        text_embedding, cos_score = self.DAPromptHead.get_embedding() #[domains * (cls + 1), 1024]
+        text_embedding = text_embedding / text_embedding.norm(dim=1, keepdim=True) #正则化
+
         gt_bboxes_s = data_s['gt_bboxes']
         gt_labels_s = data_s['gt_labels']
         gt_bboxes_t = data_t['gt_bboxes']
         gt_labels_t = data_t['gt_labels']
 
-        x_t, clip_x_t = self.extract_feat(img_t, domain_t)
+        #x_t_origin, loss_kd_t = self.extract_feat(img_t, domain_t)
+        #x_t = tuple(level + torch.mul(level, self.DAPrompt[1].unsqueeze(0)) for level in x_t_origin)
+        x_t = self.extract_feat(img_t, domain_t)
 
-        x_s, clip_x_s = self.extract_feat(img_s, domain_s)
+        #x_s_origin, loss_kd_s = self.extract_feat(img_s, domain_s)
+        #x_s = tuple(level + torch.mul(level, self.DAPrompt[0].unsqueeze(0)) for level in x_s_origin)
+        #获取text prompt也可以用来作为衡量像素距离的指标？越和text prompt相似，就越增大该像素点的激活值
+        x_s = self.extract_feat(img_s, domain_s)
 
 
         losses = dict()
-
+        ####################
+        losses.update({'loss_cos':cos_score})
         if self.feat_dis_head is not None:
-            loss_feat_s = self.feat_dis_head.forward_train(x_s, domain_s)
-            loss_feat_t = self.feat_dis_head.forward_train(x_t, domain_t)
-            losses.update({'loss_feat_s':loss_feat_s['loss_feat']})
-            losses.update({'loss_feat_t':loss_feat_t['loss_feat']})
-            #backbone输出的特征标记为0 clip输出的特征标记为1
-            loss_distillation_backbone_s = self.clip_distillation_head.forward_train(x_s, domain_s)
-            loss_distillation_backbone_t = self.clip_distillation_head.forward_train(x_t, domain_s)
-            loss_distillation_clip_s = self.clip_distillation_head.forward_train(clip_x_s, domain_t)
-            loss_distillation_clip_t = self.clip_distillation_head.forward_train(clip_x_t, domain_t)
-            losses.update({'loss_distillation_backbone':loss_distillation_backbone_s['loss_feat']+loss_distillation_backbone_t['loss_feat']})
-            losses.update({'loss_distillation_clip':loss_distillation_clip_s['loss_feat']+loss_distillation_clip_t['loss_feat']})
+            ########################
+            pass
+            ###########################
+            #loss_feat_s = self.feat_dis_head.forward_train(x_s, domain_s)
+            #loss_feat_t = self.feat_dis_head.forward_train(x_t, domain_t)
+            #losses.update({'loss_feat_s':loss_feat_s['loss_feat']})
+            #losses.update({'loss_feat_t':loss_feat_t['loss_feat']})
         if self.mask_head is not None:
             mask = self.mask_head(x_s, x_t)[0]
             x_mask = []
@@ -259,22 +296,28 @@ class DAClipDetector(DABaseDetector):
                 losses.update(rpn_losses)
             else:
                 proposal_list = proposals
-
+            is_source = True
             roi_losses, bbox_feat_s = self.roi_head.forward_train(x_s, img_metas_s, proposal_list_s,
                                                               gt_bboxes_s, gt_labels_s,
+                                                              text_embedding, is_source,
                                                               gt_bboxes_ignore, gt_masks,
                                                               **kwargs)
             import math
             if math.isnan(roi_losses['loss_bbox']):
                 roi_losses, bbox_feat_s = self.roi_head.forward_train(x_s, img_metas_s, proposal_list_s,
                                                               gt_bboxes_s, gt_labels_s,
+                                                              text_embedding, is_source,
                                                               gt_bboxes_ignore, gt_masks,
                                                               **kwargs)
 
+
+
         if self.ins_dis_head is not None:
             bbox_feat_s = bbox_feat_s.view(-1, 256*7*7)
+            is_source = False
             _, bbox_feat_t = self.roi_head.forward_train(x_t, img_metas_t, proposal_list_t,
                                                          gt_bboxes_t, gt_labels_t,
+                                                         text_embedding, is_source,
                                                          gt_bboxes_ignore, gt_masks,
                                                          **kwargs)
             bbox_feat_t = bbox_feat_t.view(-1, 256*7*7)
@@ -306,8 +349,14 @@ class DAClipDetector(DABaseDetector):
     def simple_test(self, img, img_metas, domain, proposals=None, rescale=False):
         """Test without augmentation."""
         assert self.with_bbox, 'Bbox head must be implemented.'
+        #################################
+        #self.DAPrompt = self.DAPromptHead.get_embedding() #[domains * cls, 1024]->[domains * cls, 256]
+        text_embedding, _ = self.DAPromptHead.get_embedding() #[domains * cls, 1024]
 
         x = self.extract_feat(img, domain)
+        #x_origin = self.extract_feat(img, domain)
+        #x = tuple(level + torch.mul(level, self.DAPrompt[1].unsqueeze(0)) for level in x_origin)
+        #####################################
         #import numpy as np
         #import os
         #np.save(os.path.splitext(os.path.split(img_metas[0]['ori_filename'])[1])[0]+'.npy', x[0].detach().cpu())
@@ -317,7 +366,7 @@ class DAClipDetector(DABaseDetector):
             proposal_list = proposals
 
         return self.roi_head.simple_test(
-            x, proposal_list, img_metas, rescale=rescale)
+            x, proposal_list, img_metas, text_embedding, rescale=rescale)
     def aug_test(self, imgs, img_metas, rescale=False):
         """Test with augmentations.
 
